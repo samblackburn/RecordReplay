@@ -12,11 +12,11 @@ The technique is intended to memoize highly stateful objects such as databases, 
 ## Example
 ``` c#
 var kvs = new InMemoryKeyValueStore(); // In reality you'd want a persisted store
-var rr = RecordReplay<IFoo>.Create(kvs, () => new SlowFoo());
-rr.Append("HELLO"); // Our SlowFoo will be created at this point
-var output = rr.Append("GOODBYE");
+var foo = RecordReplay<IFoo>.Create(kvs, () => new SlowFoo());
+foo.Append("HELLO"); // Our SlowFoo will be created at this point
+var output = foo.Append("GOODBYE");
 
-var rr = RecordReplay<IFoo>.Create(kvs, () => new SlowFoo());
-rr.Append("HELLO"); // At this point another SlowFoo won't be created, and the cache will be used
-var output = rr.Append("GOODBYE");
+var foo2 = RecordReplay<IFoo>.Create(kvs, () => new SlowFoo());
+foo2.Append("HELLO"); // At this point another SlowFoo won't be created, and the cache will be used
+var output = foo2.Append("GOODBYE");
 ```
