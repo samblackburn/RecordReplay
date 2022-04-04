@@ -8,20 +8,7 @@ using Castle.DynamicProxy;
 
 namespace RecordReplay
 {
-    public class RecordReplay<TFoo>
-        where TFoo : class
-    {
-        private readonly object _proxy;
-        public TFoo Object => (TFoo)_proxy;
-
-        public RecordReplay(IKeyValueStore store, Func<TFoo> getNewObject, Func<object, string>? dumpState = null)
-        {
-            _proxy = new ProxyGenerator().CreateInterfaceProxyWithTargetInterface(typeof(TFoo), (TFoo)null!,
-                new RecordReplayInterceptor<TFoo>(store, getNewObject, dumpState));
-        }
-    }
-
-    internal class RecordReplayInterceptor<TFoo> : IInterceptor
+    public class RecordReplay<TFoo> : IInterceptor where TFoo : class
     {
         private readonly List<IInvocation> _invocationsSoFar = new();
         private readonly IKeyValueStore _store;
@@ -29,7 +16,13 @@ namespace RecordReplay
         private readonly Func<TFoo> _getNewObject;
         private readonly Func<object, string> _dumpState;
 
-        public RecordReplayInterceptor(IKeyValueStore store, Func<TFoo> getNewObject, Func<object, string>? dumpState)
+        public static TFoo Create(IKeyValueStore store, Func<TFoo> getNewObject, Func<object, string>? dumpState = null)
+        {
+            return (TFoo)new ProxyGenerator().CreateInterfaceProxyWithTargetInterface(typeof(TFoo), default(TFoo),
+                new RecordReplay<TFoo>(store, getNewObject, dumpState));
+        }
+        
+        private RecordReplay(IKeyValueStore store, Func<TFoo> getNewObject, Func<object, string>? dumpState)
         {
             _store = store;
             _getNewObject = getNewObject;

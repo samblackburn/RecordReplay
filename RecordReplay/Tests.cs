@@ -15,10 +15,9 @@ namespace RecordReplay
 
         private static void ConcatenateTwoWords(IKeyValueStore kvs, Func<IFoo> getNewObject)
         {
-            var rr = new RecordReplay<IFoo>(kvs, getNewObject);
-            var obj = rr.Object;
-            obj.Append("HELLO");
-            var output = obj.Append("GOODBYE");
+            var rr = RecordReplay<IFoo>.Create(kvs, getNewObject);
+            rr.Append("HELLO");
+            var output = rr.Append("GOODBYE");
             Assert.AreEqual(output, ("HELLO" + "GOODBYE").Length);
         }
     }
