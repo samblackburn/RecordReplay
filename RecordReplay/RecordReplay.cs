@@ -1,75 +1,83 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Linq;
-using System.Linq.Expressions;
 using System.Security.Cryptography;
 using System.Text;
-using Moq;
+using System.Text.Json;
+using Castle.DynamicProxy;
 
 namespace RecordReplay
 {
     public class RecordReplay<TFoo>
         where TFoo : class
     {
-        private readonly IKeyValueStore _store;
-        private readonly Func<TFoo> _getNewObject;
-        private readonly Mock<TFoo> _mock = new(MockBehavior.Strict);
-        private readonly List<IReadOnlyList<object>> _invocationsSoFar = new();
-        private readonly Func<object, string> _dumpState;
-        private TFoo? _recordInstance;
-        public TFoo Object => _mock.Object;
+        private readonly object _proxy;
+        public TFoo Object => (TFoo)_proxy;
 
-        public RecordReplay(IKeyValueStore store, Func<TFoo> getNewObject, Func<object, string> dumpState)
+        public RecordReplay(IKeyValueStore store, Func<TFoo> getNewObject, Func<object, string>? dumpState = null)
+        {
+            _proxy = new ProxyGenerator().CreateInterfaceProxyWithTargetInterface(typeof(TFoo), (TFoo)null!,
+                new RecordReplayInterceptor<TFoo>(store, getNewObject, dumpState));
+        }
+    }
+
+    internal class RecordReplayInterceptor<TFoo> : IInterceptor
+    {
+        private readonly List<IInvocation> _invocationsSoFar = new();
+        private readonly IKeyValueStore _store;
+        private TFoo? _recordInstance;
+        private readonly Func<TFoo> _getNewObject;
+        private readonly Func<object, string> _dumpState;
+
+        public RecordReplayInterceptor(IKeyValueStore store, Func<TFoo> getNewObject, Func<object, string>? dumpState)
         {
             _store = store;
             _getNewObject = getNewObject;
-            _dumpState = dumpState;
+            _dumpState = dumpState ?? (x => JsonSerializer.Serialize(x));
         }
 
-        public void Setup<TArg, TReturn>(Expression<Func<TFoo, TReturn>> moq, Func<TFoo, TArg, TReturn> func)
+        public void Intercept(IInvocation invocation)
         {
-            _mock.Setup(moq).Returns(new InvocationFunc(x => RecordOrReplay(x.Arguments, func)));
-        }
-
-        private TReturn? RecordOrReplay<TArg, TReturn>(IReadOnlyList<object> args, Func<TFoo, TArg, TReturn> func)
-        {
-            _invocationsSoFar.Add(args);
+            _invocationsSoFar.Add(invocation);
             var hash = Hash(_invocationsSoFar);
             if (_store.TryGetValue(hash, out var val))
             {
                 // Replay mode
-                return (TReturn?)val;
+                invocation.ReturnValue = val;
+                return;
             }
 
             if (_recordInstance == null)
             {
                 _recordInstance = _getNewObject();
-                foreach (var invocation in _invocationsSoFar.SkipLast(1))
+                foreach (var i in _invocationsSoFar.SkipLast(1))
                 {
                     // Catch up previous calls
-                    Invoke(func, invocation);
+                    Invoke(i);
                 }
             }
 
             // Record
-            var result = Invoke(func, _invocationsSoFar.Last());
+            var result = Invoke(_invocationsSoFar.Last());
             _store.SetValue(hash, result);
-            return result;
+            invocation.ReturnValue = result;
         }
 
-        private TReturn Invoke<TArg, TReturn>(Func<TFoo, TArg, TReturn> func, IReadOnlyList<object> args)
+        private object? Invoke(IInvocation invocation)
         {
-            return func.Invoke(_recordInstance!, (TArg)args.Single());
+            return invocation.Method.Invoke(_recordInstance, invocation.Arguments);
         }
 
-        private string Hash(IReadOnlyList<IReadOnlyList<object>> data)
+        private string Hash(IEnumerable<IInvocation> invocations)
         {
             var hasher = new SHA256Managed();
             var hash = Array.Empty<byte>();
 
-            foreach (var query in data)
+            foreach (var invocation in invocations)
             {
-                foreach (var arg in query)
+                hash = hasher.ComputeHash(hash.Concat(Encoding.Unicode.GetBytes(invocation.Method.ToString() ?? "")).ToArray());
+                
+                foreach (var arg in invocation.Arguments)
                 {
                     hash = hasher.ComputeHash(hash.Concat(Encoding.Unicode.GetBytes(_dumpState(arg))).ToArray());
                 }
